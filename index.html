@@ -1,0 +1,637 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PeerDrop - Advanced Secure P2P Rooms</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #1f2937; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .hidden { display: none; }
+        .message-options { visibility: hidden; opacity: 0; transition: opacity 0.2s; }
+        .message-container:hover .message-options { visibility: visible; opacity: 1; }
+        video { transform: scaleX(-1); } /* Mirror local video */
+        
+        #chatInput { min-height: 44px; max-height: 150px; overflow-y: auto; }
+        #chatInput[contenteditable=true]:empty:before {
+            content: "Type a message...";
+            color: #9ca3af;
+        }
+        .mention {
+            background-color: #4f46e5;
+            color: white;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: default;
+        }
+        #mentionSuggestions {
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            z-index: 10;
+            background-color: #374151;
+            border: 1px solid #4b5563;
+            border-radius: 8px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .mention-suggestion-item {
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+        .mention-suggestion-item:hover, .mention-suggestion-item.selected {
+            background-color: #4f46e5;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 flex items-center justify-center min-h-screen p-4">
+
+    <!-- Initial Setup Screen -->
+    <div id="setupScreen" class="w-full max-w-md mx-auto bg-gray-800 rounded-2xl shadow-2xl p-8 space-y-6">
+        <h1 class="text-3xl font-bold text-center text-violet-400">Welcome to PeerDrop</h1>
+        <input type="text" id="userNameInput" placeholder="Enter your name" class="w-full bg-gray-700 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-violet-500">
+        <div class="flex space-x-4">
+            <button id="showCreateRoomBtn" class="flex-1 bg-violet-600 hover:bg-violet-700 text-white font-semibold py-2 px-4 rounded-lg">Create Room</button>
+            <button id="showJoinRoomBtn" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg">Join Room</button>
+        </div>
+        <div id="createRoomForm" class="hidden space-y-4 pt-4 border-t border-gray-700">
+            <input type="text" id="roomNameInput" placeholder="Enter a Room Name" class="w-full bg-gray-700 rounded-lg p-3">
+            <input type="password" id="roomKeyInput" placeholder="Enter a Password" class="w-full bg-gray-700 rounded-lg p-3">
+            <button id="createRoomBtn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg">Create & Enter</button>
+        </div>
+        <div id="joinRoomForm" class="hidden space-y-4 pt-4 border-t border-gray-700">
+            <input type="text" id="joinRoomNameInput" placeholder="Enter the Room Name" class="w-full bg-gray-700 rounded-lg p-3">
+            <input type="password" id="joinRoomKeyInput" placeholder="Enter the Password" class="w-full bg-gray-700 rounded-lg p-3">
+            <button id="joinRoomBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg">Join Room</button>
+        </div>
+        <p id="setupError" class="text-red-400 text-center text-sm"></p>
+    </div>
+
+    <!-- Main Application Screen -->
+    <div id="mainAppScreen" class="hidden w-full max-w-5xl mx-auto bg-gray-800 rounded-2xl shadow-2xl flex flex-col h-[95vh]">
+        <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+            <div>
+                <h1 id="roomNameHeader" class="text-xl font-bold text-violet-400"></h1>
+                <p id="participantsHeader" class="text-gray-400 text-sm"></p>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button id="callBtn" class="bg-green-600 hover:bg-green-700 text-white p-2 rounded-lg" title="Start Call"><i class="fas fa-video"></i></button>
+                <button id="leaveBtn" class="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg" title="Leave Room"><i class="fas fa-sign-out-alt"></i></button>
+            </div>
+        </div>
+        <div class="flex-grow flex min-h-0">
+            <div class="flex-grow p-4 flex flex-col min-h-0">
+                <div id="chatWindow" class="flex-grow bg-gray-900 rounded-lg p-4 space-y-4 overflow-y-auto custom-scrollbar mb-4"></div>
+                <div id="typingIndicator" class="h-5 text-sm text-gray-400 italic"></div>
+                <div id="replyPreview" class="hidden p-2 mb-2 bg-gray-700 rounded-lg text-sm"></div>
+                <div class="relative">
+                    <div id="mentionSuggestions" class="hidden"></div>
+                    <div class="bg-gray-700 p-1 rounded-t-lg flex space-x-2">
+                        <button id="createPollBtn" class="px-2 py-1 hover:bg-gray-600 rounded" title="Create Poll"><i class="fas fa-poll"></i></button>
+                        <label for="fileInput" class="px-2 py-1 hover:bg-gray-600 rounded cursor-pointer" title="Send File"><i class="fas fa-paperclip"></i></label>
+                        <input type="file" id="fileInput" class="hidden">
+                    </div>
+                    <div class="flex space-x-2 bg-gray-700 p-2 rounded-b-lg">
+                        <div id="chatInput" contenteditable="true" class="flex-grow bg-gray-600 rounded-lg p-2 focus:outline-none custom-scrollbar"></div>
+                        <button id="sendBtn" class="bg-violet-600 hover:bg-violet-700 text-white font-semibold py-2 px-4 rounded-lg self-end">Send</button>
+                    </div>
+                </div>
+            </div>
+            <div id="videoCallContainer" class="hidden w-1/3 bg-gray-900 border-l border-gray-700 p-2 flex-col space-y-2"></div>
+        </div>
+    </div>
+    
+    <div id="pollModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div class="bg-gray-800 rounded-lg p-6 w-full max-w-md space-y-4">
+            <h2 class="text-2xl font-bold">Create a Poll</h2>
+            <input id="pollQuestion" type="text" placeholder="Poll Question" class="w-full bg-gray-700 p-2 rounded">
+            <div id="pollOptionsContainer" class="space-y-2">
+                <input type="text" class="poll-option-input w-full bg-gray-700 p-2 rounded" placeholder="Option 1">
+                <input type="text" class="poll-option-input w-full bg-gray-700 p-2 rounded" placeholder="Option 2">
+            </div>
+            <button id="addPollOptionBtn" class="text-sm text-violet-400 hover:text-violet-300">+ Add Option</button>
+            <div class="flex justify-end space-x-2">
+                <button id="cancelPollBtn" class="bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded-lg">Cancel</button>
+                <button id="submitPollBtn" class="bg-violet-600 hover:bg-violet-500 px-4 py-2 rounded-lg">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script type="module">
+        // --- DOM Elements ---
+        const getEl = id => document.getElementById(id);
+        const setupScreen = getEl('setupScreen'), mainAppScreen = getEl('mainAppScreen'), userNameInput = getEl('userNameInput');
+        const showCreateRoomBtn = getEl('showCreateRoomBtn'), showJoinRoomBtn = getEl('showJoinRoomBtn');
+        const createRoomForm = getEl('createRoomForm'), joinRoomForm = getEl('joinRoomForm');
+        const roomNameInput = getEl('roomNameInput'), roomKeyInput = getEl('roomKeyInput'), createRoomBtn = getEl('createRoomBtn');
+        const joinRoomNameInput = getEl('joinRoomNameInput'), joinRoomKeyInput = getEl('joinRoomKeyInput'), joinRoomBtn = getEl('joinRoomBtn');
+        const setupError = getEl('setupError'), roomNameHeader = getEl('roomNameHeader'), participantsHeader = getEl('participantsHeader');
+        const leaveBtn = getEl('leaveBtn'), chatWindow = getEl('chatWindow'), chatInput = getEl('chatInput'), sendBtn = getEl('sendBtn'), fileInput = getEl('fileInput');
+        const typingIndicator = getEl('typingIndicator'), callBtn = getEl('callBtn');
+        const videoCallContainer = getEl('videoCallContainer'), createPollBtn = getEl('createPollBtn'), pollModal = getEl('pollModal');
+        const pollQuestion = getEl('pollQuestion'), pollOptionsContainer = getEl('pollOptionsContainer'), addPollOptionBtn = getEl('addPollOptionBtn');
+        const cancelPollBtn = getEl('cancelPollBtn'), submitPollBtn = getEl('submitPollBtn'), mentionSuggestions = getEl('mentionSuggestions');
+
+        // --- Global State ---
+        let peer, myUserName, roomName, isHost = false, sessionKey;
+        let connections = {}, messages = {}, polls = {}, receivedFileChunks = {};
+        let typingTimeout;
+        const SALT = "peer-drop-secure-salt-v4";
+        const CHUNK_SIZE = 64 * 1024;
+
+        // --- Utility & Crypto ---
+        const generateUniqueId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        async function deriveKey(password) {
+            const enc = new TextEncoder();
+            const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]);
+            return crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc.encode(SALT), iterations: 100000, hash: "SHA-256" }, keyMaterial, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+        }
+        async function encrypt(data) {
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const encoded = new TextEncoder().encode(JSON.stringify(data));
+            const encryptedData = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, sessionKey, encoded);
+            return { iv: Array.from(iv), data: new Uint8Array(encryptedData) };
+        }
+        async function decrypt(payload) {
+            try {
+                const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(payload.iv) }, sessionKey, payload.data);
+                return JSON.parse(new TextDecoder().decode(decrypted));
+            } catch (e) { console.error("Decryption failed:", e); return null; }
+        }
+        const sanitizeHTML = (html) => {
+            const temp = document.createElement('div');
+            temp.innerHTML = html;
+            const allowedTags = ['B', 'I', 'U', 'STRIKE', 'SPAN', 'DIV', 'P', 'BR'];
+            const allowedAttrs = ['class', 'contenteditable'];
+            temp.querySelectorAll('*').forEach(el => {
+                if (!allowedTags.includes(el.tagName)) {
+                    el.remove();
+                    return;
+                }
+                for (const attr of [...el.attributes]) {
+                    if (!allowedAttrs.includes(attr.name.toLowerCase())) {
+                        el.removeAttribute(attr.name);
+                    }
+                }
+            });
+            return temp.innerHTML;
+        };
+
+        // --- Core Logic ---
+        async function broadcast(data) {
+            const encryptedPayload = await encrypt(data);
+            const payload = { type: 'encrypted', payload: encryptedPayload };
+            if (isHost) {
+                Object.values(connections).forEach(c => c.conn.send(payload));
+            } else if (connections.host?.conn.open) {
+                connections.host.conn.send(payload);
+            }
+        }
+        
+        function updateParticipantsList() {
+            const userNames = [myUserName, ...Object.values(connections)
+                .map(c => c.userName)
+                .filter(name => name !== myUserName)];
+
+            participantsHeader.textContent = `${userNames.length} online: ${userNames.join(', ')}`;
+
+            // When participants change, update read receipts for all sent messages
+            Object.values(messages)
+                .filter(m => m.sender === myUserName)
+                .forEach(m => updateReadReceipts(m.messageId));
+        }
+
+
+        // --- PeerJS Setup ---
+        function initializePeer(id) {
+            peer = new Peer(id, { debug: 2 });
+            peer.on('open', peerId => {
+                console.log('PeerJS initialized:', peerId);
+                setupScreen.classList.add('hidden');
+                mainAppScreen.classList.remove('hidden');
+                roomNameHeader.textContent = `Room: ${roomName}`;
+                updateParticipantsList();
+            });
+            peer.on('connection', handleNewConnection);
+            peer.on('error', err => {
+                console.error('PeerJS error:', err);
+                setupError.textContent = `Error: ${err.message}. The host may not be available.`;
+            });
+        }
+
+        function handleNewConnection(conn) {
+            conn.on('open', () => {
+                conn.on('data', async data => {
+                    if (data.type === 'auth' && isHost) {
+                        connections[conn.peer] = { conn, userName: data.userName };
+                        conn.send({ type: 'auth_success' });
+                        const joinData = { type: 'user_join', payload: { peerId: conn.peer, userName: data.userName } };
+                        handleData(joinData); // Host handles it first
+                        broadcast(joinData); // Host tells everyone else
+                        // Send full state to the new user
+                        const syncData = { type: 'full_sync', payload: { messages, polls, connections: Object.fromEntries(Object.entries(connections).map(([id, val]) => [id, {userName: val.userName}])) } };
+                        const encryptedSync = await encrypt(syncData);
+                        conn.send({ type: 'encrypted', payload: encryptedSync });
+                        updateParticipantsList();
+                        setupConnectionListeners(conn);
+                    }
+                });
+            });
+        }
+
+        function setupConnectionListeners(conn) {
+            conn.on('data', async data => {
+                if (data.type === 'encrypted') {
+                    const decrypted = await decrypt(data.payload);
+                    if (decrypted) {
+                        // Host relays to everyone except the original sender
+                        if (isHost) {
+                            Object.values(connections).forEach(c => {
+                                if (c.conn.peer !== conn.peer) {
+                                    c.conn.send(data);
+                                }
+                            });
+                        }
+                        handleData(decrypted, conn.peer);
+                    }
+                }
+            });
+            conn.on('close', () => handlePeerDisconnect(conn.peer));
+        }
+
+        function handlePeerDisconnect(peerId) {
+            const userName = connections[peerId]?.userName;
+            if (userName) {
+                const leaveData = { type: 'user_leave', payload: { peerId, userName } };
+                delete connections[peerId];
+                if (isHost) broadcast(leaveData);
+                handleData(leaveData);
+                updateParticipantsList();
+            }
+        }
+
+        // --- Data Handler ---
+        function handleData(data, fromPeerId) {
+            const { type, payload } = data;
+            switch (type) {
+                case 'message': messages[payload.messageId] = payload; displayMessage(payload); break;
+                case 'file_start': displayFileMessage(payload); break;
+                case 'file_chunk': handleFileChunk(payload); break;
+                case 'message_read':
+                    if (messages[payload.messageId]) {
+                        if (!messages[payload.messageId].readBy.includes(payload.userName)) {
+                            messages[payload.messageId].readBy.push(payload.userName);
+                        }
+                        updateReadReceipts(payload.messageId);
+                    }
+                    break;
+                case 'poll': polls[payload.pollId] = payload; displayPoll(payload); break;
+                case 'vote_poll':
+                    if (polls[payload.pollId]) {
+                        const poll = polls[payload.pollId];
+                        Object.values(poll.votes).forEach(voters => {
+                            const userIndex = voters.indexOf(payload.userName);
+                            if (userIndex > -1) voters.splice(userIndex, 1);
+                        });
+                        poll.votes[payload.option].push(payload.userName);
+                        updatePollUI(payload.pollId);
+                    }
+                    break;
+                case 'typing': typingIndicator.textContent = `${payload.userName} is typing...`; break;
+                case 'stop_typing': typingIndicator.textContent = ''; break;
+                case 'user_join':
+                    if (!connections[payload.peerId]) {
+                        connections[payload.peerId] = { conn: null, userName: payload.userName };
+                        displaySystemMessage(`${payload.userName} has joined.`);
+                        updateParticipantsList();
+                    }
+                    break;
+                case 'user_leave':
+                    displaySystemMessage(`${payload.userName} has left.`);
+                    delete connections[payload.peerId];
+                    updateParticipantsList();
+                    break;
+                case 'full_sync':
+                    messages = payload.messages;
+                    polls = payload.polls;
+                    if (!isHost) {
+                        Object.entries(payload.connections).forEach(([id, data]) => {
+                            if (id !== peer.id && !connections[id]) connections[id] = data;
+                        });
+                        updateParticipantsList();
+                    }
+                    chatWindow.innerHTML = '';
+                    Object.values({ ...messages, ...polls }).sort((a, b) => a.timestamp - b.timestamp).forEach(item => {
+                        if (item.pollId) displayPoll(item);
+                        else if (item.fileId) displayFileMessage(item);
+                        else displayMessage(item);
+                    });
+                    break;
+            }
+        }
+        
+        function displaySystemMessage(text) {
+            chatWindow.innerHTML += `<div class="text-center text-sm text-violet-400 my-2">${text}</div>`;
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        // --- UI Rendering ---
+        function displayMessage(data) {
+            const { messageId, sender, content } = data;
+            if (getEl(messageId)) return;
+            const isSentByMe = sender === myUserName;
+            const container = document.createElement('div');
+            container.id = messageId;
+            container.className = `message-container flex flex-col w-full ${isSentByMe ? 'items-end' : 'items-start'}`;
+            container.innerHTML = `
+                <div class="max-w-md">
+                    <div class="text-xs font-bold mb-1 ${isSentByMe ? 'text-violet-300 text-right' : 'text-green-300'}">${sender}</div>
+                    <div class="relative group">
+                        <div class="px-3 py-2 rounded-lg break-words ${isSentByMe ? 'bg-violet-600' : 'bg-gray-600'}">
+                            <div class="message-content">${sanitizeHTML(content)}</div>
+                        </div>
+                        <div class="read-receipts text-xs text-gray-400 text-right mt-1"></div>
+                    </div>
+                </div>`;
+            chatWindow.appendChild(container);
+            updateReadReceipts(messageId);
+            observeMessage(messageId);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        function displayPoll(data) { /* ... same as before ... */ }
+        function updatePollUI(pollId) { /* ... same as before ... */ }
+        window.voteInPoll = (pollId, optionId) => {
+            broadcast({ type: 'vote_poll', payload: { pollId, option: optionId, userName: myUserName } });
+        };
+        
+        function updateReadReceipts(messageId) {
+            const msg = messages[messageId];
+            const el = getEl(messageId)?.querySelector('.read-receipts');
+            if (!msg || !el || msg.sender !== myUserName) return;
+            const readByOthers = msg.readBy.filter(name => name !== myUserName);
+            const totalReceivers = Object.keys(connections).length;
+            if (readByOthers.length === totalReceivers && totalReceivers > 0) {
+                el.innerHTML = `<i class="fas fa-check-double text-blue-400" title="Read by everyone"></i>`;
+            } else if (readByOthers.length > 0) {
+                el.innerHTML = `<i class="fas fa-check-double" title="Read by ${readByOthers.join(', ')}"></i>`;
+            } else {
+                el.innerHTML = `<i class="fas fa-check" title="Delivered"></i>`;
+            }
+        }
+
+        const readObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const messageId = entry.target.id;
+                    const msg = messages[messageId];
+                    if (msg && msg.sender !== myUserName && !msg.readBy.includes(myUserName)) {
+                        broadcast({ type: 'message_read', payload: { messageId, userName: myUserName } });
+                    }
+                    readObserver.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.9 });
+        function observeMessage(messageId) { if (getEl(messageId)) readObserver.observe(getEl(messageId)); }
+
+        // --- File Transfer ---
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) sendFile(file);
+            e.target.value = ''; // Reset input
+        });
+
+        async function sendFile(file) {
+            const fileId = generateUniqueId();
+            const fileData = { type: 'file_start', payload: { fileId, name: file.name, size: file.size, type: file.type, sender: myUserName, timestamp: Date.now() } };
+            handleData(fileData); // Display locally first
+            broadcast(fileData);
+
+            const reader = new FileReader();
+            let offset = 0;
+            reader.onload = async (e) => {
+                const chunk = e.target.result;
+                await broadcast({ type: 'file_chunk', payload: { fileId, chunk, offset } });
+                offset += chunk.byteLength;
+                if (offset < file.size) {
+                    readSlice(offset);
+                }
+            };
+            const readSlice = (o) => {
+                const slice = file.slice(o, o + CHUNK_SIZE);
+                reader.readAsArrayBuffer(slice);
+            };
+            readSlice(0);
+        }
+
+        function handleFileChunk({ fileId, chunk, offset }) {
+            if (!receivedFileChunks[fileId]) {
+                receivedFileChunks[fileId] = { chunks: [], receivedSize: 0 };
+            }
+            const fileStore = receivedFileChunks[fileId];
+            fileStore.chunks.push(new Uint8Array(chunk));
+            fileStore.receivedSize += chunk.byteLength;
+            
+            const fileMessage = messages[fileId];
+            const progressBar = getEl(fileId)?.querySelector('progress');
+            if (fileMessage && progressBar) {
+                progressBar.value = fileStore.receivedSize;
+                if (fileStore.receivedSize === fileMessage.size) {
+                    const blob = new Blob(fileStore.chunks, { type: fileMessage.type });
+                    const url = URL.createObjectURL(blob);
+                    const downloadBtn = getEl(fileId).querySelector('.download-btn');
+                    downloadBtn.href = url;
+                    downloadBtn.download = fileMessage.name;
+                    downloadBtn.classList.remove('hidden');
+                    progressBar.classList.add('hidden');
+                    delete receivedFileChunks[fileId];
+                }
+            }
+        }
+
+        function displayFileMessage(data) {
+            const { fileId, name, size, sender } = data;
+            messages[fileId] = data; // Store metadata
+            const isSentByMe = sender === myUserName;
+            const container = document.createElement('div');
+            container.id = fileId;
+            container.className = `message-container flex flex-col w-full ${isSentByMe ? 'items-end' : 'items-start'}`;
+            container.innerHTML = `
+                <div class="max-w-xs w-full">
+                    <div class="text-xs font-bold mb-1 ${isSentByMe ? 'text-violet-300 text-right' : 'text-green-300'}">${sender}</div>
+                    <div class="p-3 rounded-lg ${isSentByMe ? 'bg-violet-600' : 'bg-gray-600'}">
+                        <div class="flex items-center space-x-2 mb-2">
+                            <i class="fas fa-file-alt fa-lg"></i>
+                            <div>
+                                <p class="font-semibold break-all">${name}</p>
+                                <p class="text-xs text-gray-300">${(size / 1024 / 1024).toFixed(2)} MB</p>
+                            </div>
+                        </div>
+                        <progress value="0" max="${size}" class="w-full h-2 [&::-webkit-progress-bar]:rounded-lg [&::-webkit-progress-value]:rounded-lg [&::-webkit-progress-bar]:bg-gray-500 [&::-webkit-progress-value]:bg-green-500"></progress>
+                        <a class="download-btn hidden mt-2 inline-block bg-green-500 hover:bg-green-600 px-3 py-1 rounded text-sm" href="#">Download</a>
+                    </div>
+                </div>`;
+            chatWindow.appendChild(container);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        // --- Event Handlers ---
+        sendBtn.addEventListener('click', () => {
+            const content = chatInput.innerHTML.trim();
+            if (!content) return;
+            const messageId = generateUniqueId();
+            const messageData = { type: 'message', payload: { messageId, sender: myUserName, content, timestamp: Date.now(), readBy: [myUserName] } };
+            broadcast(messageData);
+            handleData(messageData);
+            chatInput.innerHTML = '';
+        });
+        
+        chatInput.addEventListener('input', () => {
+            clearTimeout(typingTimeout);
+            broadcast({ type: 'typing', payload: { userName: myUserName } });
+            typingTimeout = setTimeout(() => {
+                broadcast({ type: 'stop_typing' });
+            }, 2000);
+            updateMentionSuggestions();
+        });
+        chatInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn.click(); }
+        });
+        
+        // --- @Mention Logic ---
+        function updateMentionSuggestions() {
+            const selection = window.getSelection();
+            if (!selection.rangeCount) return;
+            const range = selection.getRangeAt(0);
+            const textUpToCursor = range.startContainer.textContent.substring(0, range.startOffset);
+            const mentionMatch = textUpToCursor.match(/@(\w*)$/);
+
+            if (mentionMatch) {
+                const searchTerm = mentionMatch[1].toLowerCase();
+                const users = [myUserName, ...Object.values(connections).map(c => c.userName)];
+                const filteredUsers = users.filter(u => u.toLowerCase().startsWith(searchTerm) && u !== myUserName);
+                
+                if (filteredUsers.length > 0) {
+                    mentionSuggestions.innerHTML = filteredUsers.map(u => `<div class="mention-suggestion-item" data-user="${u}">${u}</div>`).join('');
+                    mentionSuggestions.classList.remove('hidden');
+                    mentionSuggestions.onclick = (e) => {
+                        const target = e.target.closest('.mention-suggestion-item');
+                        if (target) insertMention(target.dataset.user, mentionMatch);
+                    };
+                } else {
+                    mentionSuggestions.classList.add('hidden');
+                }
+            } else {
+                mentionSuggestions.classList.add('hidden');
+            }
+        }
+
+        function insertMention(userName, match) {
+            const selection = window.getSelection();
+            const range = selection.getRangeAt(0);
+            const textNode = range.startContainer;
+            
+            const mentionNode = document.createElement('span');
+            mentionNode.className = 'mention';
+            mentionNode.setAttribute('contenteditable', 'false');
+            mentionNode.textContent = `@${userName}`;
+
+            const spaceNode = document.createTextNode('\u00A0'); // Non-breaking space
+
+            const startOffset = match.index;
+            const endOffset = startOffset + match[0].length;
+            
+            range.setStart(textNode, startOffset);
+            range.setEnd(textNode, endOffset);
+            range.deleteContents();
+            
+            range.insertNode(spaceNode);
+            range.insertNode(mentionNode);
+
+            selection.collapse(spaceNode, 1); // Move cursor after the space
+            mentionSuggestions.classList.add('hidden');
+        }
+
+        // --- Init ---
+        showCreateRoomBtn.addEventListener('click', () => { createRoomForm.classList.remove('hidden'); joinRoomForm.classList.add('hidden'); });
+        showJoinRoomBtn.addEventListener('click', () => { joinRoomForm.classList.remove('hidden'); createRoomForm.classList.add('hidden'); });
+        createRoomBtn.addEventListener('click', async () => {
+            myUserName = userNameInput.value.trim();
+            roomName = roomNameInput.value.trim();
+            const key = roomKeyInput.value.trim();
+            if (!myUserName || !roomName || !key) return setupError.textContent = "All fields are required.";
+            isHost = true;
+            sessionKey = await deriveKey(key);
+            initializePeer(roomName);
+        });
+        joinRoomBtn.addEventListener('click', () => {
+            myUserName = userNameInput.value.trim();
+            roomName = joinRoomNameInput.value.trim();
+            const key = joinRoomKeyInput.value.trim();
+            if (!myUserName || !roomName || !key) return setupError.textContent = "All fields are required.";
+            isHost = false;
+            peer = new Peer();
+            peer.on('open', async () => {
+                sessionKey = await deriveKey(key);
+                const conn = peer.connect(roomName, { reliable: true });
+                connections.host = { conn, userName: 'Host' };
+                conn.on('open', () => conn.send({ type: 'auth', userName: myUserName }));
+                conn.on('data', async (data) => {
+                    if (data.type === 'auth_success') {
+                        console.log("Authentication successful.");
+                        setupScreen.classList.add('hidden');
+                        mainAppScreen.classList.remove('hidden');
+                        roomNameHeader.textContent = `Room: ${roomName}`;
+                        setupConnectionListeners(conn); // Set up the permanent listener
+                    } else if (data.type === 'encrypted') {
+                        // This handles the initial sync data
+                        const decrypted = await decrypt(data.payload);
+                        if (decrypted) handleData(decrypted, conn.peer);
+                    }
+                });
+                conn.on('close', () => { displaySystemMessage('Disconnected from the host.'); resetToSetup(); });
+            });
+        });
+        leaveBtn.addEventListener('click', () => peer.destroy());
+        window.addEventListener('beforeunload', () => peer?.destroy());
+        function resetToSetup() { window.location.reload(); }
+
+        // Poll Modal Logic
+        createPollBtn.addEventListener('click', () => pollModal.classList.remove('hidden'));
+        cancelPollBtn.addEventListener('click', () => pollModal.classList.add('hidden'));
+        addPollOptionBtn.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'poll-option-input w-full bg-gray-700 p-2 rounded';
+            input.placeholder = `Option ${pollOptionsContainer.children.length + 1}`;
+            pollOptionsContainer.appendChild(input);
+        });
+        submitPollBtn.addEventListener('click', () => {
+            const question = pollQuestion.value.trim();
+            const options = [...document.querySelectorAll('.poll-option-input')].map(input => input.value.trim()).filter(Boolean);
+            if (!question || options.length < 2) return alert('A poll needs a question and at least 2 options.');
+            const pollId = generateUniqueId();
+            const pollData = {
+                type: 'poll',
+                payload: { pollId, question, options: Object.fromEntries(options.map((opt, i) => [`opt${i}`, opt])), votes: Object.fromEntries(options.map((opt, i) => [`opt${i}`, []])), timestamp: Date.now() }
+            };
+            broadcast(pollData);
+            handleData(pollData);
+            pollModal.classList.add('hidden');
+            pollQuestion.value = '';
+            pollOptionsContainer.innerHTML = '<input type="text" class="poll-option-input w-full bg-gray-700 p-2 rounded" placeholder="Option 1"><input type="text" class="poll-option-input w-full bg-gray-700 p-2 rounded" placeholder="Option 2">';
+        });
+
+    </script>
+</body>
+</html>
+
